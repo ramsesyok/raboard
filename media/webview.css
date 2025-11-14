@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.timeline {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.placeholder {
+  opacity: 0.6;
+}
+
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--vscode-editorWidget-border);
+}
+
+.composer-input {
+  flex: 1;
+  min-height: 3rem;
+  resize: vertical;
+}
+
+.composer-send {
+  padding: 0 1rem;
+}

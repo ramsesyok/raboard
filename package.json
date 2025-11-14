@@ -1,0 +1,97 @@
+{
+  "name": "raboard",
+  "displayName": "raBoard",
+  "description": "Lightweight bulletin board/chat extension backed by a shared UNC folder.",
+  "version": "0.1.0",
+  "publisher": "your-name",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:raBoard.openTimeline"
+  ],
+  "main": "extension/dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "raBoard.openTimeline",
+        "title": "raBoard: Open Timeline"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "raBoard",
+      "properties": {
+        "raBoard.shareRoot": {
+          "type": "string",
+          "default": "\\\\mysv01\\board",
+          "description": "UNC path to the shared board root."
+        },
+        "raBoard.defaultRoom": {
+          "type": "string",
+          "default": "general",
+          "description": "Room to join on startup."
+        },
+        "raBoard.userName": {
+          "type": "string",
+          "default": "",
+          "description": "Override for the user name reported in presence (empty uses OS account)."
+        },
+        "raBoard.pollIntervalMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1000,
+          "description": "Polling interval for message updates in milliseconds."
+        },
+        "raBoard.presenceTtlSec": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "Seconds before a user is considered offline if presence is stale."
+        },
+        "raBoard.maxImageMB": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum inline image size in megabytes before falling back to download links."
+        },
+        "raBoard.maxInlinePx": {
+          "type": "number",
+          "default": 240,
+          "description": "Maximum rendered image height in pixels."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "npm run lint:eslint && npm run lint:prettier",
+    "lint:eslint": "eslint --ext .ts extension/src",
+    "lint:prettier": "prettier --check \"extension/src/**/*.ts\" \"media/**/*.{css,html,js}\"",
+    "compile": "tsc -p extension/tsconfig.json",
+    "watch": "tsc -p extension/tsconfig.json --watch",
+    "package": "npm run compile && vsce package",
+    "test": "vitest",
+    "test:integration": "echo \"Integration tests are not yet implemented\"",
+    "prepare": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.3",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.1.0",
+    "typescript": "5.3.3",
+    "vitest": "^1.0.4",
+    "@vscode/vsce": "^2.16.0"
+  },
+  "dependencies": {
+    "vscode-uri": "^3.0.7"
+  }
+}

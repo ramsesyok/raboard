@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}}; script-src 'unsafe-inline' {{cspSource}}; style-src 'unsafe-inline' {{cspSource}}; object-src 'none'; media-src 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>raBoard</title>
+    <link rel="stylesheet" href="./webview.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1 class="title">raBoard</h1>
+      </header>
+      <main class="timeline" aria-live="polite">
+        <p class="placeholder">Timeline content will be rendered here.</p>
+      </main>
+      <footer class="composer">
+        <textarea class="composer-input" placeholder="Type a message"></textarea>
+        <button class="composer-send" type="button">Send</button>
+      </footer>
+    </div>
+    <script src="./webview.js"></script>
+  </body>
+</html>
