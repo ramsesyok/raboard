@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getConfig } from './config';
+import { BoardViewProvider } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
 
 let activeRoom: string | undefined;
@@ -10,6 +11,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine('raBoard extension activated.');
 
   const config = getConfig();
+
+  const boardViewProvider = new BoardViewProvider(context.extensionUri, outputChannel);
+  const viewRegistration = vscode.window.registerWebviewViewProvider(
+    BoardViewProvider.viewId,
+    boardViewProvider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true,
+      },
+    }
+  );
+  context.subscriptions.push(viewRegistration);
 
   presenceAvailable = await checkPresenceRoot(config.shareRoot, outputChannel);
 
