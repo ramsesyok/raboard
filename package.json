@@ -63,6 +63,46 @@
           "type": "number",
           "default": 240,
           "description": "Maximum rendered image height in pixels."
+        },
+        "raBoard.initialLoadLimit": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Number of recent messages to load on startup."
+        },
+        "raBoard.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable notifications for new activity."
+        },
+        "raBoard.notifications.mode": {
+          "type": "string",
+          "enum": ["both", "toast", "badge", "status"],
+          "default": "both",
+          "description": "Notification delivery style: toast, status bar badge, or both."
+        },
+        "raBoard.notifications.rooms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Rooms to monitor for notifications (empty watches all rooms)."
+        },
+        "raBoard.notifications.throttleMs": {
+          "type": "number",
+          "default": 10000,
+          "description": "Minimum delay between repeated notifications in milliseconds."
+        },
+        "raBoard.notifications.includeActiveRoom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to notify for the room currently in view."
+        },
+        "raBoard.notifications.dnd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mute notifications temporarily (do not disturb)."
         }
       }
     }
