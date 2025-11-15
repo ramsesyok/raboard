@@ -3,6 +3,7 @@
 
   const timeline = document.querySelector('#timeline');
   const presence = document.querySelector('.presence');
+  const unreadBadge = document.querySelector('#unread-badge');
 
   const ATTACHMENT_PATTERN = /(attachments[\\/][^\s"'`>]+?\.(?:png|jpe?g|svg))/gi;
 
@@ -244,6 +245,33 @@
 
   renderPresence([]);
 
+  function renderUnreadSummary(summary) {
+    if (!(unreadBadge instanceof HTMLElement)) {
+      return;
+    }
+
+    const visible =
+      summary && summary.showBadge && typeof summary.total === 'number' && summary.total > 0;
+    if (!visible) {
+      unreadBadge.textContent = '';
+      unreadBadge.title = '';
+      unreadBadge.setAttribute('aria-hidden', 'true');
+      unreadBadge.classList.remove('badge--visible');
+      return;
+    }
+
+    unreadBadge.textContent = String(summary.total);
+    unreadBadge.setAttribute('aria-hidden', 'false');
+    unreadBadge.classList.add('badge--visible');
+
+    if (Array.isArray(summary.rooms) && summary.rooms.length > 0) {
+      const lines = summary.rooms.map((room) => `#${room.room}: ${room.count}`);
+      unreadBadge.title = lines.join('\n');
+    } else {
+      unreadBadge.title = '';
+    }
+  }
+
   function removePlaceholder() {
     if (!(timeline instanceof HTMLElement)) {
       return;
@@ -391,6 +419,11 @@
       if (roomInput instanceof HTMLInputElement) {
         roomInput.value = typeof data.room === 'string' ? data.room : '';
       }
+      return;
+    }
+
+    if (data.type === 'unread-summary') {
+      renderUnreadSummary(data.summary);
       return;
     }
   });

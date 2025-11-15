@@ -24,6 +24,30 @@ body {
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
 }
 
+.header-indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  min-width: 20px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background-color: var(--vscode-editorInfo-foreground);
+  color: var(--vscode-editor-background);
+  font-size: 12px;
+  font-weight: bold;
+  text-align: center;
+  display: none;
+}
+
+.badge--visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .room-form {
   display: flex;
   gap: 8px;

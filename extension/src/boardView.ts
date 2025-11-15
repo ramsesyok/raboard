@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { RaBoardConfig } from './config';
+import type { UnreadSummary } from './notifications';
 
 export interface TimelineAttachment {
   readonly relPath: string;
@@ -204,6 +205,10 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
     await this.postRawMessage({ type: 'room', room });
   }
 
+  public async updateUnreadSummary(summary: UnreadSummary | undefined): Promise<void> {
+    await this.postRawMessage({ type: 'unread-summary', summary });
+  }
+
   private async postMessage(message: PendingMessage): Promise<void> {
     if (this.webview) {
       const payload = resolvePendingMessage(this.webview, message);
@@ -277,7 +282,10 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
         <input id="room-input" class="room-input" type="text" name="room" placeholder="general" />
         <button type="submit" class="button button-primary">Switch</button>
       </form>
-      <button id="open-attachments" class="button" type="button">Open Attachments…</button>
+      <div class="header-indicators">
+        <span id="unread-badge" class="badge" aria-hidden="true">0</span>
+        <button id="open-attachments" class="button" type="button">Open Attachments…</button>
+      </div>
     </header>
     <main id="timeline" class="timeline" aria-live="polite" aria-label="Timeline">
       <p class="timeline-placeholder">Timeline will appear here.</p>
