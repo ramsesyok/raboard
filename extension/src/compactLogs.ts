@@ -15,6 +15,13 @@ const PRESET_LAST_WEEK = '先週まで';
 const PRESET_EXCLUDE_TODAY = '当日を除く全期間';
 const PRESET_UNTIL_DATE = '日付指定（～指定日まで）';
 
+function logDebug(output: vscode.OutputChannel, enabled: boolean, message: string): void {
+  if (!enabled) {
+    return;
+  }
+  output.appendLine(`[debug] ${message}`);
+}
+
 type PresetChoice =
   | typeof PRESET_LAST_WEEK
   | typeof PRESET_EXCLUDE_TODAY
@@ -25,6 +32,7 @@ interface CompactSummary {
   appended: number;
   skipped: number;
   days: string[];
+  appendedByDay: Record<string, number>;
 }
 
 interface ResolvedScope {
@@ -197,6 +205,7 @@ async function processSpool(
   let considered = 0;
   let appended = 0;
   let skipped = 0;
+  const appendedByDay = new Map<string, number>();
 
   for (const name of files) {
     const filePath = wjoin(spoolDir, name);
@@ -264,9 +273,21 @@ async function processSpool(
 
     appended++;
     daysTouched.add(dayKey);
+    const dayCount = appendedByDay.get(dayKey) ?? 0;
+    appendedByDay.set(dayKey, dayCount + 1);
   }
 
-  return { considered, appended, skipped, days: Array.from(daysTouched.values()).sort() };
+  const perDay = Array.from(appendedByDay.entries()).sort((a, b) =>
+    a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+  );
+
+  return {
+    considered,
+    appended,
+    skipped,
+    days: Array.from(daysTouched.values()).sort(),
+    appendedByDay: Object.fromEntries(perDay),
+  };
 }
 
 function formatSummary(room: string, scope: ResolvedScope, summary: CompactSummary): string {
@@ -305,6 +326,16 @@ export async function runCompactLogs(
       lockPath,
       async () => processSpool(spoolDir, logsDir, quarantineDir, scope.cutoffMs, output),
       { ttlMs: LOCK_TTL_MS, detail: `Compacting ${room}` }
+    );
+    const perDayEntries = Object.entries(summary.appendedByDay);
+    const perDayText =
+      perDayEntries.length > 0
+        ? perDayEntries.map(([day, count]) => `${day}=${count}`).join(', ')
+        : 'none';
+    logDebug(
+      output,
+      config.debug,
+      `Compaction metrics for "${room}": considered ${summary.considered}, appended ${summary.appended}, skipped ${summary.skipped}, per-day appends: ${perDayText}`
     );
     const message = formatSummary(room, scope, summary);
     output.appendLine(message);

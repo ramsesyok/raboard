@@ -21,6 +21,7 @@ export interface RaBoardConfig {
   maxImageMB: number;
   maxInlinePx: number;
   initialLoadLimit: number;
+  debug: boolean;
   notifications: NotificationsConfig;
 }
 
@@ -33,6 +34,7 @@ const DEFAULTS: RaBoardConfig = {
   maxImageMB: 10,
   maxInlinePx: 240,
   initialLoadLimit: 200,
+  debug: false,
   notifications: {
     enabled: true,
     mode: 'both',
@@ -55,6 +57,7 @@ export function getConfig(): RaBoardConfig {
     maxImageMB: readNumber(configuration, 'maxImageMB', DEFAULTS.maxImageMB, 1),
     maxInlinePx: readNumber(configuration, 'maxInlinePx', DEFAULTS.maxInlinePx, 64),
     initialLoadLimit: readNumber(configuration, 'initialLoadLimit', DEFAULTS.initialLoadLimit, 1),
+    debug: readBoolean(configuration, 'debug', DEFAULTS.debug),
     notifications: {
       enabled: readBoolean(configuration, 'notifications.enabled', DEFAULTS.notifications.enabled),
       mode: readMode(configuration, 'notifications.mode', DEFAULTS.notifications.mode),

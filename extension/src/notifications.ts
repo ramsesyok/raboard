@@ -23,6 +23,7 @@ interface NotificationMonitorOptions {
   readonly onFocusRoom: (room: string) => Promise<void>;
   readonly onSummary: (summary: UnreadSummary | undefined) => Promise<void>;
   readonly output: vscode.OutputChannel;
+  readonly debugLog: (message: string) => void;
 }
 
 interface RoomDelta {
@@ -216,6 +217,10 @@ export class NotificationMonitor implements vscode.Disposable {
     const tracked = new Set<string>(rooms);
     const increases: RoomDelta[] = [];
 
+    this.options.debugLog(
+      `Notification scan starting: evaluating ${rooms.length} room(s); include active room = ${config.notifications.includeActiveRoom}`
+    );
+
     for (const room of rooms) {
       if (!room) {
         continue;
@@ -270,14 +275,20 @@ export class NotificationMonitor implements vscode.Disposable {
     }
 
     let files: string[] = [];
+    let examined = 0;
     try {
-      files = await listSince(msgsDir, baseline);
+      const result = await listSince(msgsDir, baseline);
+      files = result.files;
+      examined = result.examined;
     } catch (error) {
       this.logError(`Failed to enumerate messages for room "${room}"`, error);
       return undefined;
     }
 
     if (files.length === 0) {
+      this.options.debugLog(
+        `Notifications: room "${room}" examined ${examined} file(s), no new messages since ${baseline}`
+      );
       return undefined;
     }
 
@@ -287,6 +298,10 @@ export class NotificationMonitor implements vscode.Disposable {
     const previous = this.unreadCounts.get(room) ?? 0;
     const count = previous + files.length;
     this.unreadCounts.set(room, count);
+
+    this.options.debugLog(
+      `Notifications: room "${room}" examined ${examined} file(s), increment ${files.length}, unread total ${count}`
+    );
 
     return { room, count, increment: files.length };
   }
@@ -359,6 +374,10 @@ export class NotificationMonitor implements vscode.Disposable {
       await this.options.onSummary(undefined);
     }
 
+    this.options.debugLog(
+      `Notification indicators updated: total ${total}, rooms tracked ${entries.length}, badge ${shouldShowBadge(config)}, status ${shouldShowStatus(config)}`
+    );
+
     if (shouldShowStatus(config)) {
       this.updateStatusBar(total, entries, config.notifications.dnd);
     } else {
@@ -415,11 +434,18 @@ export class NotificationMonitor implements vscode.Disposable {
 
   private async maybeShowToast(config: RaBoardConfig, increases: RoomDelta[]): Promise<void> {
     if (!shouldShowToast(config) || increases.length === 0) {
+      if (increases.length > 0) {
+        this.options.debugLog('Notification toast suppressed by configuration.');
+      }
       return;
     }
 
     const now = Date.now();
     if (now - this.lastToastAt < toThrottleMs(config)) {
+      const remaining = toThrottleMs(config) - (now - this.lastToastAt);
+      this.options.debugLog(
+        `Notification toast suppressed by throttle (${Math.max(0, remaining)}ms remaining).`
+      );
       return;
     }
 
@@ -436,6 +462,9 @@ export class NotificationMonitor implements vscode.Disposable {
     const action = sorted.length === 1 ? `Open #${primary.room}` : 'Choose room…';
 
     const choice = await vscode.window.showInformationMessage(message, action);
+    this.options.debugLog(
+      `Notification toast displayed: message="${message}", action="${action}", choice=${choice ?? 'dismissed'}`
+    );
     if (!choice) {
       return;
     }
