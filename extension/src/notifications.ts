@@ -149,6 +149,13 @@ export class NotificationMonitor implements vscode.Disposable {
     void this.publishIndicators(this.options.getConfig());
   }
 
+  public refreshIndicators(config: RaBoardConfig | undefined): void {
+    if (this.disposed) {
+      return;
+    }
+    void this.publishIndicators(config);
+  }
+
   public async showUnreadQuickPick(): Promise<void> {
     const entries = this.getSortedUnreadEntries();
     if (entries.length === 0) {
@@ -353,18 +360,17 @@ export class NotificationMonitor implements vscode.Disposable {
     }
 
     if (shouldShowStatus(config)) {
-      this.updateStatusBar(total, entries);
+      this.updateStatusBar(total, entries, config.notifications.dnd);
     } else {
       this.hideStatusBar();
     }
   }
 
-  private updateStatusBar(total: number, entries: readonly UnreadSummaryRoom[]): void {
-    if (total <= 0) {
-      this.hideStatusBar();
-      return;
-    }
-
+  private updateStatusBar(
+    total: number,
+    entries: readonly UnreadSummaryRoom[],
+    dnd: boolean
+  ): void {
     if (!this.statusBar) {
       this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
       this.statusBar.name = 'raBoard notifications';
@@ -372,6 +378,25 @@ export class NotificationMonitor implements vscode.Disposable {
     }
 
     const top = entries.slice(0, 3).map((entry) => `#${entry.room} (${entry.count})`);
+    if (dnd) {
+      const tooltipLines = ['Do not disturb enabled for raBoard notifications.'];
+      if (entries.length > 0) {
+        tooltipLines.push('', 'Unread messages:', ...top);
+        if (entries.length > top.length) {
+          tooltipLines.push(`…and ${entries.length - top.length} more room(s).`);
+        }
+      }
+      this.statusBar.text = total > 0 ? `$(bell-slash) ${total}` : '$(bell-slash) DND';
+      this.statusBar.tooltip = tooltipLines.join('\n');
+      this.statusBar.show();
+      return;
+    }
+
+    if (total <= 0) {
+      this.hideStatusBar();
+      return;
+    }
+
     const tooltipLines = ['Unread messages:', ...top];
     if (entries.length > top.length) {
       tooltipLines.push(`…and ${entries.length - top.length} more room(s).`);
