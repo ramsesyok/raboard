@@ -1,5 +1,6 @@
 :root {
   color-scheme: light dark;
+  --timeline-inline-image-max-height: 240px;
 }
 
 body {
@@ -112,4 +113,39 @@ body {
   background-color: var(--vscode-editorWidget-background);
   color: var(--vscode-editorWidget-foreground);
   font-size: 12px;
+}
+
+.timeline-attachments {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-attachment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.timeline-attachment__image {
+  display: block;
+  max-height: var(--timeline-inline-image-max-height, 240px);
+  max-width: 100%;
+  width: auto;
+  border-radius: 4px;
+  object-fit: contain;
+  background-color: var(--vscode-editor-background);
+}
+
+.timeline-attachment__link {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.timeline-attachment__link:hover,
+.timeline-attachment__link:focus {
+  color: var(--vscode-textLink-activeForeground);
 }
