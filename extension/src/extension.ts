@@ -2,7 +2,12 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
 import { getConfig, type RaBoardConfig, wjoin } from './config';
-import { BoardViewProvider, type TimelineMessage, type TimelineAttachment } from './boardView';
+import {
+  BoardViewProvider,
+  type SwitchRoomHandler,
+  type TimelineMessage,
+  type TimelineAttachment,
+} from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
 import { listSince, listTail } from './shared/listing';
 import {
@@ -19,14 +24,77 @@ let presenceAvailable = false;
 let pollTimer: NodeJS.Timeout | undefined;
 let heartbeatTimer: NodeJS.Timeout | undefined;
 let presenceScanTimer: NodeJS.Timeout | undefined;
-let lastSeenMessageName: string | undefined;
 let currentConfig: RaBoardConfig | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let boardViewProvider: BoardViewProvider | undefined;
 let lastPresenceUsers: string[] = [];
 
+const LAST_SEEN_STORAGE_KEY = 'raBoard.lastSeenMessageNames';
+const lastSeenMessageNames = new Map<string, string>();
+let globalState: vscode.Memento | undefined;
+
 const ATTACHMENT_PATTERN = /(attachments[\\/][^\s"'`>]+?\.(?:png|jpe?g|svg))/gi;
 const MAX_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.svg']);
+
+function getLastSeenMessageName(room: string): string | undefined {
+  return lastSeenMessageNames.get(room);
+}
+
+async function persistLastSeenMessageNames(): Promise<void> {
+  if (!globalState) {
+    return;
+  }
+
+  const serialized: Record<string, string> = {};
+  for (const [room, name] of lastSeenMessageNames) {
+    if (typeof name === 'string' && name.length > 0) {
+      serialized[room] = name;
+    }
+  }
+
+  await globalState.update(LAST_SEEN_STORAGE_KEY, serialized);
+}
+
+function restoreLastSeenMessageNames(value: unknown): void {
+  lastSeenMessageNames.clear();
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+
+  const entries = value as Record<string, unknown>;
+  for (const [room, name] of Object.entries(entries)) {
+    if (typeof room !== 'string' || room.trim().length === 0) {
+      continue;
+    }
+
+    if (typeof name === 'string' && name.length > 0) {
+      lastSeenMessageNames.set(room, name);
+    }
+  }
+}
+
+async function updateLastSeenMessageName(room: string, name: string | undefined): Promise<void> {
+  const existing = lastSeenMessageNames.get(room);
+
+  if (!name) {
+    if (!lastSeenMessageNames.has(room)) {
+      return;
+    }
+    lastSeenMessageNames.delete(room);
+  } else {
+    if (existing === name) {
+      return;
+    }
+    lastSeenMessageNames.set(room, name);
+  }
+
+  try {
+    await persistLastSeenMessageNames();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    outputChannel?.appendLine(`Failed to persist last seen message for "${room}": ${detail}`);
+  }
+}
 
 async function readMessage(dir: string, name: string): Promise<SpoolMessage | undefined> {
   try {
@@ -368,6 +436,51 @@ async function deliverMessages(
   }
 }
 
+async function trySetActiveRoom(
+  room: string,
+  options: { showAlreadyActiveMessage?: boolean; showSuccessMessage?: boolean } = {}
+): Promise<boolean> {
+  if (!currentConfig || !outputChannel) {
+    return false;
+  }
+
+  if (room === activeRoom) {
+    if (options.showAlreadyActiveMessage) {
+      await vscode.window.showInformationMessage(`Already viewing room "${room}".`);
+    }
+    return false;
+  }
+
+  try {
+    await ensureRoomReady(room, currentConfig.shareRoot);
+  } catch (error) {
+    handleRoomError(error, room, outputChannel);
+    return false;
+  }
+
+  stopPolling();
+  activeRoom = room;
+  outputChannel.appendLine(`Switched to room "${activeRoom}".`);
+
+  if (boardViewProvider) {
+    await boardViewProvider.resetTimeline([]);
+  }
+
+  await loadInitialTimeline(activeRoom);
+
+  if (boardViewProvider) {
+    await boardViewProvider.announceRoom(activeRoom);
+  }
+
+  startPolling();
+
+  if (options.showSuccessMessage) {
+    await vscode.window.showInformationMessage(`Switched to room "${activeRoom}".`);
+  }
+
+  return true;
+}
+
 export async function loadInitialTimeline(room: string): Promise<void> {
   if (!currentConfig || !outputChannel) {
     return;
@@ -378,7 +491,8 @@ export async function loadInitialTimeline(room: string): Promise<void> {
   try {
     const recent = await listTail(msgsDir, currentConfig.initialLoadLimit);
     await deliverMessages('reset', msgsDir, recent);
-    lastSeenMessageName = recent.length > 0 ? recent[recent.length - 1] : undefined;
+    const lastSeen = recent.length > 0 ? recent[recent.length - 1] : undefined;
+    await updateLastSeenMessageName(room, lastSeen);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     outputChannel.appendLine(`Failed to load initial timeline for room "${room}": ${detail}`);
@@ -391,7 +505,8 @@ export async function loadIncremental(room: string): Promise<void> {
   }
 
   const msgsDir = wjoin(currentConfig.shareRoot, 'rooms', room, 'msgs');
-  const since = lastSeenMessageName ?? '';
+  const lastSeen = getLastSeenMessageName(room);
+  const since = lastSeen ?? '';
 
   try {
     const newer = await listSince(msgsDir, since);
@@ -399,8 +514,8 @@ export async function loadIncremental(room: string): Promise<void> {
       return;
     }
 
-    await deliverMessages(lastSeenMessageName ? 'append' : 'reset', msgsDir, newer);
-    lastSeenMessageName = newer[newer.length - 1];
+    await deliverMessages(lastSeen ? 'append' : 'reset', msgsDir, newer);
+    await updateLastSeenMessageName(room, newer[newer.length - 1]);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     outputChannel.appendLine(`Failed to load incremental timeline for room "${room}": ${detail}`);
@@ -413,11 +528,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const config = getConfig();
   currentConfig = config;
+  globalState = context.globalState;
+  const storedLastSeen = context.globalState.get<Record<string, string> | undefined>(
+    LAST_SEEN_STORAGE_KEY
+  );
+  restoreLastSeenMessageNames(storedLastSeen);
+
+  const handleSwitchRoomFromWebview: SwitchRoomHandler = async (room) => {
+    const trimmed = room.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const switched = await trySetActiveRoom(trimmed);
+    if (!switched && activeRoom) {
+      await boardViewProvider?.announceRoom(activeRoom);
+    }
+  };
 
   boardViewProvider = new BoardViewProvider(
     context.extensionUri,
     outputChannel,
     () => currentConfig,
+    handleSwitchRoomFromWebview,
     async (text) => {
       const room = activeRoom;
       if (!room) {
@@ -443,11 +576,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
 
   try {
-    await ensureRoomReady(config.defaultRoom, config.shareRoot);
-    activeRoom = config.defaultRoom;
-    outputChannel.appendLine(`Active room set to "${activeRoom}".`);
-    await loadInitialTimeline(activeRoom);
-    startPolling();
+    const switched = await trySetActiveRoom(config.defaultRoom);
+    if (switched) {
+      outputChannel.appendLine(`Active room set to "${config.defaultRoom}".`);
+    }
   } catch (error) {
     handleRoomError(error, config.defaultRoom, outputChannel);
   }
@@ -484,23 +616,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
 
-    if (trimmedRoom === activeRoom) {
-      await vscode.window.showInformationMessage(`Already viewing room "${trimmedRoom}".`);
-      return;
-    }
-
-    try {
-      await ensureRoomReady(trimmedRoom, config.shareRoot);
-      stopPolling();
-      activeRoom = trimmedRoom;
-      lastSeenMessageName = undefined;
-      outputChannel.appendLine(`Switched to room "${activeRoom}".`);
-      await loadInitialTimeline(activeRoom);
-      startPolling();
-      await vscode.window.showInformationMessage(`Switched to room "${activeRoom}".`);
-    } catch (error) {
-      handleRoomError(error, trimmedRoom, outputChannel);
-    }
+    await trySetActiveRoom(trimmedRoom, {
+      showAlreadyActiveMessage: true,
+      showSuccessMessage: true,
+    });
   });
 
   context.subscriptions.push(openTimeline, switchRoom, outputChannel);

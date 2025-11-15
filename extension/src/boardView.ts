@@ -42,6 +42,8 @@ interface SwitchRoomMessage {
   readonly room?: string;
 }
 
+export type SwitchRoomHandler = (room: string) => Promise<void>;
+
 interface OpenAttachmentsMessage {
   readonly type: 'open-attachments-dir';
 }
@@ -79,6 +81,7 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly output: vscode.OutputChannel,
     private readonly getConfig: () => RaBoardConfig | undefined,
+    private readonly onSwitchRoom?: SwitchRoomHandler,
     private readonly onSendMessage?: SendMessageHandler
   ) {}
 
@@ -119,11 +122,24 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
       }
       case 'switch-room': {
         this.output.appendLine('Webview requested to switch rooms.');
-        void vscode.window.showInformationMessage(
-          message.room
-            ? `Switching to room "${message.room}" is not implemented yet.`
-            : 'Switch room is not implemented yet.'
-        );
+        const requested = message.room?.trim();
+        if (!requested) {
+          void vscode.window.showErrorMessage('Please provide a room name to switch to.');
+          return;
+        }
+
+        if (!this.onSwitchRoom) {
+          void vscode.window.showErrorMessage('Switching rooms is not available.');
+          return;
+        }
+
+        try {
+          await this.onSwitchRoom(requested);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          this.output.appendLine(`Failed to switch rooms: ${detail}`);
+          void vscode.window.showErrorMessage(`Failed to switch rooms: ${detail}`);
+        }
         return;
       }
       case 'open-attachments-dir': {
@@ -182,6 +198,10 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
 
   public async updatePresence(users: readonly string[]): Promise<void> {
     await this.postRawMessage({ type: 'presence', users: [...users] });
+  }
+
+  public async announceRoom(room: string): Promise<void> {
+    await this.postRawMessage({ type: 'room', room });
   }
 
   private async postMessage(message: PendingMessage): Promise<void> {
