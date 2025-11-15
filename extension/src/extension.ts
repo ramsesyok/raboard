@@ -19,6 +19,7 @@ import {
   scanPresence,
 } from './shared/presence';
 import { postMessage, type SpoolMessage } from './shared/spool';
+import { runCompactLogs } from './compactLogs';
 
 let activeRoom: string | undefined;
 let presenceAvailable = false;
@@ -655,7 +656,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
-  context.subscriptions.push(openTimeline, switchRoom, outputChannel);
+  const compactLogs = vscode.commands.registerCommand('raBoard.compactLogs', async () => {
+    if (!currentConfig || !outputChannel) {
+      void vscode.window.showErrorMessage('Configuration is not available.');
+      return;
+    }
+
+    await runCompactLogs(currentConfig, outputChannel);
+  });
+
+  context.subscriptions.push(openTimeline, switchRoom, compactLogs, outputChannel);
 }
 
 export function deactivate(): void {
