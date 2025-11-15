@@ -1,6 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'fs';
 import * as vscode from 'vscode';
 import { getConfig, wjoin } from './config';
+import { showWarningToast } from './toast';
 
 export const REQUIRED_ROOM_SUBDIRS = ['msgs', 'attachments', 'logs'] as const;
 
@@ -71,7 +72,7 @@ export async function checkPresenceRoot(
     presenceWarningDisplayed = true;
     const warning = `Presence root missing at ${presenceRoot}. Presence features are disabled.`;
     outputChannel?.appendLine(warning);
-    void vscode.window.showWarningMessage(
+    void showWarningToast(
       'Presence features are disabled because the "presence" folder is missing. Please contact your raBoard administrator.'
     );
   }

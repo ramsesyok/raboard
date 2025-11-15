@@ -115,10 +115,24 @@ export class NotificationMonitor implements vscode.Disposable {
 
     const interval = toThrottleMs(config);
     this.timer = setInterval(() => {
-      void this.scan();
+      try {
+        const promise = this.scan();
+        promise?.catch((error) => {
+          this.logError('Notification polling tick failed', error);
+        });
+      } catch (error) {
+        this.logError('Notification polling loop threw', error);
+      }
     }, interval);
 
-    void this.scan();
+    try {
+      const startup = this.scan();
+      startup?.catch((error) => {
+        this.logError('Notification polling tick failed', error);
+      });
+    } catch (error) {
+      this.logError('Notification polling loop threw', error);
+    }
   }
 
   public markRoomRead(room: string): void {

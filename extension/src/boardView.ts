@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RaBoardConfig } from './config';
 import type { UnreadSummary } from './notifications';
+import { showErrorToast, showInfoToast } from './toast';
 
 export interface TimelineAttachment {
   readonly relPath: string;
@@ -125,12 +126,12 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
         this.output.appendLine('Webview requested to switch rooms.');
         const requested = message.room?.trim();
         if (!requested) {
-          void vscode.window.showErrorMessage('Please provide a room name to switch to.');
+          void showErrorToast('Please provide a room name to switch to.');
           return;
         }
 
         if (!this.onSwitchRoom) {
-          void vscode.window.showErrorMessage('Switching rooms is not available.');
+          void showErrorToast('Switching rooms is not available.');
           return;
         }
 
@@ -139,13 +140,13 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           this.output.appendLine(`Failed to switch rooms: ${detail}`);
-          void vscode.window.showErrorMessage(`Failed to switch rooms: ${detail}`);
+          void showErrorToast(`Failed to switch rooms: ${detail}`);
         }
         return;
       }
       case 'open-attachments-dir': {
         this.output.appendLine('Webview requested to open the attachments directory.');
-        void vscode.window.showInformationMessage('Opening attachments is not implemented yet.');
+        void showInfoToast('Opening attachments is not implemented yet.');
         return;
       }
       default: {
@@ -157,12 +158,12 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
   private async handleSendMessage(text: string | undefined): Promise<void> {
     const trimmedText = text?.trim() ?? '';
     if (!trimmedText) {
-      void vscode.window.showErrorMessage('Message text cannot be empty.');
+      void showErrorToast('Message text cannot be empty.');
       return;
     }
 
     if (!this.onSendMessage) {
-      void vscode.window.showErrorMessage('Sending messages is not available.');
+      void showErrorToast('Sending messages is not available.');
       return;
     }
 
@@ -176,7 +177,7 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.output.appendLine(`Failed to post message: ${detail}`);
-      void vscode.window.showErrorMessage(`Failed to send message: ${detail}`);
+      void showErrorToast(`Failed to send message: ${detail}`);
     }
   }
 
