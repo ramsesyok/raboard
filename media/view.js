@@ -2,6 +2,36 @@
   const vscode = acquireVsCodeApi();
 
   const timeline = document.querySelector('#timeline');
+  const presence = document.querySelector('.presence');
+
+  function renderPresence(users) {
+    if (!(presence instanceof HTMLElement)) {
+      return;
+    }
+
+    presence.innerHTML = '';
+
+    const list = Array.isArray(users)
+      ? users.filter((user) => typeof user === 'string' && user.trim().length > 0)
+      : [];
+
+    if (list.length === 0) {
+      const pill = document.createElement('span');
+      pill.className = 'presence-pill';
+      pill.textContent = 'No active users';
+      presence.append(pill);
+      return;
+    }
+
+    for (const user of list) {
+      const pill = document.createElement('span');
+      pill.className = 'presence-pill';
+      pill.textContent = user;
+      presence.append(pill);
+    }
+  }
+
+  renderPresence([]);
 
   function removePlaceholder() {
     if (!(timeline instanceof HTMLElement)) {
@@ -128,6 +158,12 @@
 
     if (data.type === 'send' && data.message) {
       appendMessage(data.message);
+      return;
+    }
+
+    if (data.type === 'presence') {
+      renderPresence(data.users);
+      return;
     }
   });
 })();
