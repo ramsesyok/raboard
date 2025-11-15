@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { SpoolMessage } from './shared/spool';
 
 interface SendMessage {
   readonly type: 'send';
@@ -16,12 +17,17 @@ interface OpenAttachmentsMessage {
 
 type ViewMessage = SendMessage | SwitchRoomMessage | OpenAttachmentsMessage;
 
+export type SendMessageHandler = (text: string) => Promise<SpoolMessage>;
+
 export class BoardViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'raBoard.view';
 
+  private webview: vscode.Webview | undefined;
+
   public constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly output: vscode.OutputChannel
+    private readonly output: vscode.OutputChannel,
+    private readonly onSendMessage?: SendMessageHandler
   ) {}
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -32,16 +38,18 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
+    this.webview = webviewView.webview;
+
     webviewView.webview.onDidReceiveMessage((message: ViewMessage) => {
-      this.handleMessage(message);
+      void this.handleMessage(message);
     });
   }
 
-  private handleMessage(message: ViewMessage): void {
+  private async handleMessage(message: ViewMessage): Promise<void> {
     switch (message.type) {
       case 'send': {
         this.output.appendLine('Webview requested to send a message.');
-        void vscode.window.showInformationMessage('Sending messages is not implemented yet.');
+        await this.handleSendMessage(message.text);
         return;
       }
       case 'switch-room': {
@@ -61,6 +69,31 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
       default: {
         this.output.appendLine(`Received unknown message from webview: ${JSON.stringify(message)}`);
       }
+    }
+  }
+
+  private async handleSendMessage(text: string | undefined): Promise<void> {
+    const trimmedText = text?.trim() ?? '';
+    if (!trimmedText) {
+      void vscode.window.showErrorMessage('Message text cannot be empty.');
+      return;
+    }
+
+    if (!this.onSendMessage) {
+      void vscode.window.showErrorMessage('Sending messages is not available.');
+      return;
+    }
+
+    try {
+      const posted = await this.onSendMessage(trimmedText);
+      if (this.webview) {
+        await this.webview.postMessage({ type: 'send', message: posted });
+      }
+      this.output.appendLine(`Message ${posted.id} posted to room "${posted.room}".`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.output.appendLine(`Failed to post message: ${detail}`);
+      void vscode.window.showErrorMessage(`Failed to send message: ${detail}`);
     }
   }
 

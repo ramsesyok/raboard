@@ -1,7 +1,9 @@
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { BoardViewProvider } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
+import { postMessage } from './shared/spool';
 
 let activeRoom: string | undefined;
 let presenceAvailable = false;
@@ -12,7 +14,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const config = getConfig();
 
-  const boardViewProvider = new BoardViewProvider(context.extensionUri, outputChannel);
+  const boardViewProvider = new BoardViewProvider(
+    context.extensionUri,
+    outputChannel,
+    async (text) => {
+      const room = activeRoom;
+      if (!room) {
+        throw new Error('No active room is selected.');
+      }
+
+      const author = config.userName || os.userInfo().username;
+      return postMessage(room, author, text);
+    }
+  );
   const viewRegistration = vscode.window.registerWebviewViewProvider(
     BoardViewProvider.viewId,
     boardViewProvider,
