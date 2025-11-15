@@ -114,6 +114,10 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
     await this.postMessage({ type: 'messages', append: messages });
   }
 
+  public async updatePresence(users: readonly string[]): Promise<void> {
+    await this.postMessage({ type: 'presence', users: [...users] });
+  }
+
   private async postMessage(message: unknown): Promise<void> {
     if (this.webview) {
       await this.webview.postMessage(message);

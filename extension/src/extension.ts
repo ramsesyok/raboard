@@ -5,15 +5,25 @@ import { getConfig, type RaBoardConfig, wjoin } from './config';
 import { BoardViewProvider } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
 import { listSince, listTail } from './shared/listing';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  PRESENCE_SCAN_INTERVAL_MS,
+  PresenceUnavailableError,
+  heartbeat as writePresenceHeartbeat,
+  scanPresence,
+} from './shared/presence';
 import { postMessage, type SpoolMessage } from './shared/spool';
 
 let activeRoom: string | undefined;
 let presenceAvailable = false;
 let pollTimer: NodeJS.Timeout | undefined;
+let heartbeatTimer: NodeJS.Timeout | undefined;
+let presenceScanTimer: NodeJS.Timeout | undefined;
 let lastSeenMessageName: string | undefined;
 let currentConfig: RaBoardConfig | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let boardViewProvider: BoardViewProvider | undefined;
+let lastPresenceUsers: string[] = [];
 
 async function readMessage(dir: string, name: string): Promise<SpoolMessage | undefined> {
   try {
@@ -50,6 +60,122 @@ function stopPolling(): void {
     clearInterval(pollTimer);
     pollTimer = undefined;
   }
+}
+
+function getEffectiveUserName(config: RaBoardConfig): string {
+  return config.userName || os.userInfo().username;
+}
+
+function presenceArraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  return a.every((value, index) => value === b[index]);
+}
+
+async function pushPresenceUsers(users: readonly string[]): Promise<void> {
+  const normalized = users.map((user) => user.trim()).filter((user) => user.length > 0);
+
+  if (presenceArraysEqual(lastPresenceUsers, normalized)) {
+    return;
+  }
+
+  lastPresenceUsers = [...normalized];
+
+  if (boardViewProvider) {
+    await boardViewProvider.updatePresence(normalized);
+  }
+}
+
+function stopPresenceTimers(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  }
+
+  if (presenceScanTimer) {
+    clearInterval(presenceScanTimer);
+    presenceScanTimer = undefined;
+  }
+}
+
+async function handlePresenceUnavailable(): Promise<void> {
+  if (!currentConfig) {
+    return;
+  }
+
+  const available = await checkPresenceRoot(currentConfig.shareRoot, outputChannel);
+  await updatePresenceAvailability(available);
+}
+
+async function handlePresenceError(context: string, error: unknown): Promise<void> {
+  const detail = error instanceof Error ? error.message : String(error);
+  outputChannel?.appendLine(`${context}: ${detail}`);
+
+  if (error instanceof PresenceUnavailableError) {
+    await handlePresenceUnavailable();
+  }
+}
+
+async function runHeartbeatOnce(): Promise<void> {
+  if (!currentConfig || !presenceAvailable) {
+    return;
+  }
+
+  try {
+    const user = getEffectiveUserName(currentConfig);
+    await writePresenceHeartbeat(currentConfig.shareRoot, user);
+  } catch (error) {
+    await handlePresenceError('Failed to write presence heartbeat', error);
+  }
+}
+
+async function runPresenceScanOnce(): Promise<void> {
+  if (!currentConfig || !presenceAvailable) {
+    return;
+  }
+
+  try {
+    const users = await scanPresence(currentConfig.shareRoot, currentConfig.presenceTtlSec, {
+      onError: (message) => outputChannel?.appendLine(message),
+    });
+    await pushPresenceUsers(users);
+  } catch (error) {
+    await handlePresenceError('Failed to scan presence', error);
+  }
+}
+
+function startPresenceTimers(): void {
+  if (!currentConfig || !presenceAvailable) {
+    return;
+  }
+
+  if (!heartbeatTimer) {
+    void runHeartbeatOnce();
+    heartbeatTimer = setInterval(() => {
+      void runHeartbeatOnce();
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  if (!presenceScanTimer) {
+    void runPresenceScanOnce();
+    presenceScanTimer = setInterval(() => {
+      void runPresenceScanOnce();
+    }, PRESENCE_SCAN_INTERVAL_MS);
+  }
+}
+
+async function updatePresenceAvailability(enabled: boolean): Promise<void> {
+  presenceAvailable = enabled;
+
+  if (presenceAvailable) {
+    startPresenceTimers();
+    return;
+  }
+
+  stopPresenceTimers();
+  await pushPresenceUsers([]);
 }
 
 async function deliverMessages(
@@ -129,7 +255,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       throw new Error('No active room is selected.');
     }
 
-    const author = config.userName || os.userInfo().username;
+    const author = getEffectiveUserName(config);
     return postMessage(room, author, text);
   });
   const viewRegistration = vscode.window.registerWebviewViewProvider(
@@ -143,7 +269,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(viewRegistration);
 
-  presenceAvailable = await checkPresenceRoot(config.shareRoot, outputChannel);
+  await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
 
   try {
     await ensureRoomReady(config.defaultRoom, config.shareRoot);
@@ -157,7 +283,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const openTimeline = vscode.commands.registerCommand('raBoard.openTimeline', async () => {
     outputChannel.appendLine('Open Timeline command invoked.');
-    presenceAvailable = await checkPresenceRoot(config.shareRoot, outputChannel);
+    await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
     if (!activeRoom) {
       void vscode.window.showErrorMessage(
         'No active room is available. Please switch to a room once it has been provisioned.'
@@ -174,7 +300,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const switchRoom = vscode.commands.registerCommand('raBoard.switchRoom', async () => {
-    presenceAvailable = await checkPresenceRoot(config.shareRoot, outputChannel);
+    await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
 
     const nextRoom = await vscode.window.showInputBox({
       prompt: 'Enter the room to open',
@@ -211,6 +337,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   stopPolling();
+  stopPresenceTimers();
 }
 
 function handleRoomError(error: unknown, room: string, outputChannel: vscode.OutputChannel): void {
