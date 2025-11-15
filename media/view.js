@@ -386,5 +386,12 @@
       renderPresence(data.users);
       return;
     }
+
+    if (data.type === 'room') {
+      if (roomInput instanceof HTMLInputElement) {
+        roomInput.value = typeof data.room === 'string' ? data.room : '';
+      }
+      return;
+    }
   });
 })();
