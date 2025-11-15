@@ -190,8 +190,11 @@ function readNotificationMode(
   fallback: NotificationMode
 ): NotificationMode {
   const value = configuration.get<string | undefined>(key);
-  if (typeof value === 'string' && VALID_NOTIFICATION_MODES.includes(value as NotificationMode)) {
-    return value as NotificationMode;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (VALID_NOTIFICATION_MODES.includes(normalized as NotificationMode)) {
+      return normalized as NotificationMode;
+    }
   }
 
   return fallback;

@@ -57,11 +57,13 @@
         "raBoard.maxImageMB": {
           "type": "number",
           "default": 10,
+          "minimum": 1,
           "description": "Maximum inline image size in megabytes before falling back to download links."
         },
         "raBoard.maxInlinePx": {
           "type": "number",
           "default": 240,
+          "minimum": 64,
           "description": "Maximum rendered image height in pixels."
         },
         "raBoard.initialLoadLimit": {
@@ -92,6 +94,7 @@
         "raBoard.notifications.throttleMs": {
           "type": "number",
           "default": 10000,
+          "minimum": 0,
           "description": "Minimum delay between repeated notifications in milliseconds."
         },
         "raBoard.notifications.includeActiveRoom": {
