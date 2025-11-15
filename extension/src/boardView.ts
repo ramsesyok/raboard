@@ -23,6 +23,7 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'raBoard.view';
 
   private webview: vscode.Webview | undefined;
+  private pendingMessages: unknown[] = [];
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -39,6 +40,13 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
     this.webview = webviewView.webview;
+
+    if (this.pendingMessages.length > 0) {
+      const backlog = this.pendingMessages.splice(0);
+      for (const message of backlog) {
+        void this.webview.postMessage(message);
+      }
+    }
 
     webviewView.webview.onDidReceiveMessage((message: ViewMessage) => {
       void this.handleMessage(message);
@@ -86,15 +94,33 @@ export class BoardViewProvider implements vscode.WebviewViewProvider {
 
     try {
       const posted = await this.onSendMessage(trimmedText);
-      if (this.webview) {
-        await this.webview.postMessage({ type: 'send', message: posted });
-      }
+      await this.postMessage({ type: 'send', message: posted });
       this.output.appendLine(`Message ${posted.id} posted to room "${posted.room}".`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.output.appendLine(`Failed to post message: ${detail}`);
       void vscode.window.showErrorMessage(`Failed to send message: ${detail}`);
     }
+  }
+
+  public async resetTimeline(messages: SpoolMessage[]): Promise<void> {
+    await this.postMessage({ type: 'reset', messages });
+  }
+
+  public async appendTimeline(messages: SpoolMessage[]): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+    await this.postMessage({ type: 'messages', append: messages });
+  }
+
+  private async postMessage(message: unknown): Promise<void> {
+    if (this.webview) {
+      await this.webview.postMessage(message);
+      return;
+    }
+
+    this.pendingMessages.push(message);
   }
 
   private getHtml(webview: vscode.Webview): string {
