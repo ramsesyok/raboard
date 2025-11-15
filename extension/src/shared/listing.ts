@@ -17,7 +17,13 @@ export async function listTail(dir: string, limit: number): Promise<string[]> {
   return files.slice(-limit);
 }
 
-export async function listSince(dir: string, lastName: string): Promise<string[]> {
+export interface ListSinceResult {
+  files: string[];
+  examined: number;
+}
+
+export async function listSince(dir: string, lastName: string): Promise<ListSinceResult> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
-  return toSortedFileNames(entries).filter((name) => name > lastName);
+  const files = toSortedFileNames(entries);
+  return { files: files.filter((name) => name > lastName), examined: files.length };
 }

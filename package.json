@@ -104,6 +104,13 @@
           "description": "Maximum number of recent messages to load when a room opens.",
           "markdownDescription": "Maximum number of recent messages to load when a room opens (default 200)."
         },
+        "raBoard.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose debug logging for raBoard.",
+          "markdownDescription": "Enable verbose debug logging for raBoard. When true, additional metrics are written to the raBoard output channel.",
+          "hidden": true
+        },
         "raBoard.notifications.enabled": {
           "type": "boolean",
           "default": true,

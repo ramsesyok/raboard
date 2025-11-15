@@ -41,6 +41,17 @@ const ATTACHMENT_PATTERN = /(attachments[\\/][^\s"'`>]+?\.(?:png|jpe?g|svg))/gi;
 const MAX_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.svg']);
 const reportedAttachmentFailures = new Set<string>();
 
+function isDebugEnabled(): boolean {
+  return currentConfig?.debug === true;
+}
+
+function logDebug(message: string): void {
+  if (!isDebugEnabled()) {
+    return;
+  }
+  outputChannel?.appendLine(`[debug] ${message}`);
+}
+
 function getLastSeenMessageName(room: string): string | undefined {
   return lastSeenMessageNames.get(room);
 }
@@ -560,9 +571,16 @@ export async function loadIncremental(room: string): Promise<void> {
   const msgsDir = wjoin(currentConfig.shareRoot, 'rooms', room, 'msgs');
   const lastSeen = getLastSeenMessageName(room);
   const since = lastSeen ?? '';
+  const startedAt = Date.now();
+  let examined = 0;
+  let loaded = 0;
+  let failureDetail: string | undefined;
 
   try {
-    const newer = await listSince(msgsDir, since);
+    const { files: newer, examined: examinedCount } = await listSince(msgsDir, since);
+    examined = examinedCount;
+    loaded = newer.length;
+
     if (newer.length === 0) {
       return;
     }
@@ -572,7 +590,18 @@ export async function loadIncremental(room: string): Promise<void> {
     notificationMonitor?.markRoomRead(room);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    failureDetail = detail;
     outputChannel.appendLine(`Failed to load incremental timeline for room "${room}": ${detail}`);
+  }
+
+  if (isDebugEnabled()) {
+    const durationMs = Date.now() - startedAt;
+    const baseMessage = `Polling cycle for "${room}": examined ${examined}, loaded ${loaded}, duration ${durationMs}ms`;
+    if (failureDetail) {
+      logDebug(`${baseMessage} (failed: ${failureDetail})`);
+    } else {
+      logDebug(baseMessage);
+    }
   }
 }
 
@@ -583,6 +612,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = getConfig();
   currentConfig = config;
   globalState = context.globalState;
+  if (config.debug) {
+    logDebug('Debug logging enabled.');
+  }
   const storedLastSeen = context.globalState.get<Record<string, string> | undefined>(
     LAST_SEEN_STORAGE_KEY
   );
@@ -646,6 +678,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     },
     output: outputChannel,
+    debugLog: logDebug,
   });
   context.subscriptions.push(notificationMonitor);
 
