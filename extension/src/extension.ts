@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
 import { getConfig, type RaBoardConfig, wjoin } from './config';
-import { BoardViewProvider } from './boardView';
+import { BoardViewProvider, type TimelineMessage, type TimelineAttachment } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
 import { listSince, listTail } from './shared/listing';
 import {
@@ -25,6 +25,9 @@ let outputChannel: vscode.OutputChannel | undefined;
 let boardViewProvider: BoardViewProvider | undefined;
 let lastPresenceUsers: string[] = [];
 
+const ATTACHMENT_PATTERN = /(attachments[\\/][^\s"'`>]+?\.(?:png|jpe?g|svg))/gi;
+const MAX_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.svg']);
+
 async function readMessage(dir: string, name: string): Promise<SpoolMessage | undefined> {
   try {
     const payload = await fs.readFile(wjoin(dir, name), 'utf8');
@@ -40,6 +43,168 @@ async function readMessage(dir: string, name: string): Promise<SpoolMessage | un
     outputChannel?.appendLine(`Failed to read ${wjoin(dir, name)}: ${detail}`);
     return undefined;
   }
+}
+
+function trimTrailingPunctuation(value: string): string {
+  let result = value;
+  while (result.length > 0 && /[)>.,;:!?\]]$/.test(result[result.length - 1])) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
+function normalizeAttachmentRelPath(raw: string): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+
+  let candidate = raw.trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  if (
+    (candidate.startsWith('"') && candidate.endsWith('"')) ||
+    (candidate.startsWith("'") && candidate.endsWith("'"))
+  ) {
+    candidate = candidate.slice(1, -1);
+  }
+
+  candidate = trimTrailingPunctuation(candidate);
+  candidate = candidate.replace(/\\/g, '/');
+
+  while (candidate.startsWith('./')) {
+    candidate = candidate.slice(2);
+  }
+
+  if (candidate.startsWith('/')) {
+    return undefined;
+  }
+
+  const lowered = candidate.toLowerCase();
+  if (!lowered.startsWith('attachments/')) {
+    return undefined;
+  }
+
+  const segments = candidate.split('/');
+  const safeSegments: string[] = [];
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (trimmed === '.' || trimmed === '..') {
+      return undefined;
+    }
+    safeSegments.push(trimmed);
+  }
+
+  if (safeSegments.length < 2) {
+    return undefined;
+  }
+
+  safeSegments[0] = 'attachments';
+
+  const fileName = safeSegments[safeSegments.length - 1];
+  const dotIndex = fileName.lastIndexOf('.');
+  if (dotIndex === -1) {
+    return undefined;
+  }
+
+  const ext = fileName.slice(dotIndex).toLowerCase();
+  if (!MAX_IMAGE_EXTENSIONS.has(ext)) {
+    return undefined;
+  }
+
+  return safeSegments.join('/');
+}
+
+function extractAttachmentRelPaths(text: string): Set<string> {
+  const results = new Set<string>();
+  if (typeof text !== 'string' || text.length === 0) {
+    return results;
+  }
+
+  for (const match of text.matchAll(ATTACHMENT_PATTERN)) {
+    const candidate = match[1] ?? match[0];
+    const normalized = normalizeAttachmentRelPath(candidate);
+    if (normalized) {
+      results.add(normalized);
+    }
+  }
+
+  return results;
+}
+
+function collectAttachmentDisplayHints(message: SpoolMessage): Map<string, 'inline' | 'link'> {
+  const hints = new Map<string, 'inline' | 'link'>();
+  for (const attachment of message.attachments) {
+    const normalized = normalizeAttachmentRelPath(attachment.relPath);
+    if (!normalized) {
+      continue;
+    }
+
+    if (attachment.mime && !attachment.mime.toLowerCase().startsWith('image/')) {
+      continue;
+    }
+
+    hints.set(normalized, attachment.display === 'link' ? 'link' : 'inline');
+  }
+  return hints;
+}
+
+async function resolveImageAttachment(
+  message: SpoolMessage,
+  relPath: string,
+  preferredDisplay: 'inline' | 'link' | undefined
+): Promise<TimelineAttachment | undefined> {
+  const config = currentConfig;
+  if (!config) {
+    return undefined;
+  }
+
+  const segments = relPath.split('/');
+  const absolutePath = wjoin(config.shareRoot, 'rooms', message.room, ...segments);
+
+  try {
+    const stat = await fs.stat(absolutePath);
+    const maxBytes = config.maxImageMB * 1024 * 1024;
+    const display: 'inline' | 'link' =
+      preferredDisplay === 'link' || stat.size > maxBytes ? 'link' : 'inline';
+    const fileUri = vscode.Uri.file(absolutePath);
+    return { relPath, display, fileUri };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    outputChannel?.appendLine(
+      `Unable to load attachment ${relPath} for message ${message.id}: ${detail}`
+    );
+    return undefined;
+  }
+}
+
+async function toTimelineMessage(message: SpoolMessage): Promise<TimelineMessage> {
+  const hints = collectAttachmentDisplayHints(message);
+  const candidates = new Set<string>(hints.keys());
+  for (const relPath of extractAttachmentRelPaths(message.text)) {
+    candidates.add(relPath);
+  }
+
+  const attachments: TimelineAttachment[] = [];
+  for (const relPath of candidates) {
+    const resolved = await resolveImageAttachment(message, relPath, hints.get(relPath));
+    if (resolved) {
+      attachments.push(resolved);
+    }
+  }
+
+  return {
+    id: message.id,
+    ts: message.ts,
+    room: message.room,
+    from: message.from,
+    text: message.text,
+    attachments,
+  };
 }
 
 function startPolling(): void {
@@ -188,11 +353,11 @@ async function deliverMessages(
     return;
   }
 
-  const messages: SpoolMessage[] = [];
+  const messages: TimelineMessage[] = [];
   for (const file of files) {
     const parsed = await readMessage(dir, file);
     if (parsed) {
-      messages.push(parsed);
+      messages.push(await toTimelineMessage(parsed));
     }
   }
 
@@ -249,15 +414,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = getConfig();
   currentConfig = config;
 
-  boardViewProvider = new BoardViewProvider(context.extensionUri, outputChannel, async (text) => {
-    const room = activeRoom;
-    if (!room) {
-      throw new Error('No active room is selected.');
-    }
+  boardViewProvider = new BoardViewProvider(
+    context.extensionUri,
+    outputChannel,
+    () => currentConfig,
+    async (text) => {
+      const room = activeRoom;
+      if (!room) {
+        throw new Error('No active room is selected.');
+      }
 
-    const author = getEffectiveUserName(config);
-    return postMessage(room, author, text);
-  });
+      const author = getEffectiveUserName(config);
+      const posted = await postMessage(room, author, text);
+      return toTimelineMessage(posted);
+    }
+  );
   const viewRegistration = vscode.window.registerWebviewViewProvider(
     BoardViewProvider.viewId,
     boardViewProvider,
