@@ -18,7 +18,11 @@
     "onCommand:raBoard.compactLogs",
     "onCommand:raBoard.openAttachments",
     "onCommand:raBoard.toggleDnd",
-    "onCommand:raBoard.openUnreadRoom"
+    "onCommand:raBoard.openUnreadRoom",
+    "onCommand:raBoard.devForcePoll",
+    "onCommand:raBoard.devDumpConfig",
+    "onCommand:raBoard.devInjectDummy",
+    "onCommand:raBoard.markAllRead"
   ],
   "main": "extension/dist/extension.js",
   "contributes": {
@@ -46,6 +50,22 @@
       {
         "command": "raBoard.openUnreadRoom",
         "title": "raBoard: Open Unread Room…"
+      },
+      {
+        "command": "raBoard.devForcePoll",
+        "title": "raBoard: Dev - Force Poll"
+      },
+      {
+        "command": "raBoard.devDumpConfig",
+        "title": "raBoard: Dev - Dump Config"
+      },
+      {
+        "command": "raBoard.devInjectDummy",
+        "title": "raBoard: Dev - Inject Dummy Message"
+      },
+      {
+        "command": "raBoard.markAllRead",
+        "title": "raBoard: Mark All Read"
       }
     ],
     "configuration": {
