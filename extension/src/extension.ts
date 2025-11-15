@@ -52,6 +52,18 @@ function logDebug(message: string): void {
   outputChannel?.appendLine(`[debug] ${message}`);
 }
 
+function sanitizeConfigForOutput(config: RaBoardConfig): Record<string, unknown> {
+  return {
+    ...config,
+    shareRoot: config.shareRoot ? '[redacted]' : '',
+    userName: config.userName ? '[configured]' : '',
+    notifications: {
+      ...config.notifications,
+      rooms: [...config.notifications.rooms],
+    },
+  };
+}
+
 function getLastSeenMessageName(room: string): string | undefined {
   return lastSeenMessageNames.get(room);
 }
@@ -700,6 +712,135 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   notificationMonitor.start();
 
+  const devForcePoll = vscode.commands.registerCommand('raBoard.devForcePoll', async () => {
+    if (!currentConfig || !outputChannel) {
+      await showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    const room = activeRoom;
+    if (!room) {
+      await showErrorToast('No active room is available.');
+      return;
+    }
+
+    outputChannel.appendLine(`Force poll requested for "${room}".`);
+
+    try {
+      await loadIncremental(room);
+      await showInfoToast(`Polled "${room}" for new messages.`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`Force poll failed for "${room}": ${detail}`);
+      await showErrorToast('Failed to force poll the active room.', { detail });
+    }
+  });
+
+  const devDumpConfig = vscode.commands.registerCommand('raBoard.devDumpConfig', async () => {
+    if (!outputChannel) {
+      return;
+    }
+
+    const configToDump = currentConfig;
+    if (!configToDump) {
+      outputChannel.appendLine('Configuration is not available.');
+      await showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    outputChannel.appendLine('raBoard configuration (sanitized):');
+    const sanitized = sanitizeConfigForOutput(configToDump);
+    const serialized = JSON.stringify(sanitized, null, 2);
+    for (const line of serialized.split('\n')) {
+      outputChannel.appendLine(line);
+    }
+    await showInfoToast('Sanitized configuration written to the raBoard output.');
+  });
+
+  const devInjectDummy = vscode.commands.registerCommand('raBoard.devInjectDummy', async () => {
+    if (!currentConfig || !outputChannel) {
+      await showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    const room = activeRoom;
+    if (!room) {
+      await showErrorToast('No active room is available.');
+      return;
+    }
+
+    const now = new Date();
+    const text = `Dummy message generated at ${now.toISOString()}.`;
+    const author = getEffectiveUserName(currentConfig);
+
+    if (currentConfig.debug) {
+      try {
+        await postMessage(room, author, text);
+        outputChannel.appendLine(`Dummy spool message written for "${room}".`);
+        await loadIncremental(room);
+        await showInfoToast(`Dummy spool message queued for "${room}".`);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Failed to inject dummy message for "${room}": ${detail}`);
+        await showErrorToast('Failed to inject dummy message.', { detail });
+      }
+      return;
+    }
+
+    const dummyMessage: SpoolMessage = {
+      id: `dummy-${now.getTime().toString(16)}`,
+      ts: now.toISOString(),
+      room,
+      from: author,
+      type: 'msg',
+      text,
+      replyTo: null,
+      attachments: [],
+    };
+    const timelineMessage = await toTimelineMessage(dummyMessage);
+    if (boardViewProvider) {
+      await boardViewProvider.appendTimeline([timelineMessage]);
+    }
+    outputChannel.appendLine(`Injected local-only dummy message for "${room}" (debug disabled).`);
+    await showInfoToast('Injected local-only dummy message (not persisted).');
+  });
+
+  const markAllRead = vscode.commands.registerCommand('raBoard.markAllRead', async () => {
+    if (!currentConfig || !outputChannel) {
+      await showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    const room = activeRoom;
+    if (!room) {
+      await showErrorToast('No active room is available.');
+      return;
+    }
+
+    const msgsDir = wjoin(currentConfig.shareRoot, 'rooms', room, 'msgs');
+    let latest: string | undefined;
+    try {
+      const recent = await listTail(msgsDir, 1);
+      latest = recent.length > 0 ? recent[recent.length - 1] : undefined;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`Failed to inspect messages for "${room}": ${detail}`);
+      await showErrorToast('Failed to mark room as read.', { detail });
+      return;
+    }
+
+    await updateLastSeenMessageName(room, latest);
+    notificationMonitor?.markRoomRead(room);
+
+    if (latest) {
+      outputChannel.appendLine(`Marked room "${room}" as read at ${latest}.`);
+      await showInfoToast(`Marked "${room}" as read at ${latest}.`);
+    } else {
+      outputChannel.appendLine(`Marked room "${room}" as read with no messages present.`);
+      await showInfoToast(`Marked "${room}" as read.`);
+    }
+  });
+
   const openTimeline = vscode.commands.registerCommand('raBoard.openTimeline', async () => {
     outputChannel.appendLine('Open Timeline command invoked.');
     await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
@@ -829,6 +970,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     openAttachments,
     compactLogs,
     toggleDnd,
+    devForcePoll,
+    devDumpConfig,
+    devInjectDummy,
+    markAllRead,
     outputChannel
   );
 }
