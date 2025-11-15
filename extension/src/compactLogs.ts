@@ -1,8 +1,10 @@
 import { promises as fs } from 'fs';
 import type { Dirent } from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RaBoardConfig } from './config';
 import { wjoin } from './config';
+import { showErrorToast, showInfoToast, showWarningToast } from './toast';
 import { withFileLock, LockUnavailableError } from './shared/lock';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -28,6 +30,21 @@ interface CompactSummary {
 interface ResolvedScope {
   cutoffMs: number;
   label: string;
+}
+
+async function moveToQuarantine(
+  filePath: string,
+  quarantineDir: string,
+  output: vscode.OutputChannel
+): Promise<void> {
+  try {
+    await fs.mkdir(quarantineDir, { recursive: true });
+    const destination = wjoin(quarantineDir, path.win32.basename(filePath));
+    await fs.rename(filePath, destination);
+    output.appendLine(`Moved ${filePath} to ${destination} for inspection.`);
+  } catch (error) {
+    output.appendLine(`Failed to quarantine ${filePath}: ${String(error)}`);
+  }
 }
 
 function toSortedFileNames(entries: Dirent[]): string[] {
@@ -98,12 +115,12 @@ async function pickRoom(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     output.appendLine(`Failed to enumerate rooms under ${roomsRoot}: ${detail}`);
-    void vscode.window.showErrorMessage(`Failed to enumerate rooms under ${roomsRoot}: ${detail}`);
+    await showErrorToast(`Failed to enumerate rooms under ${roomsRoot}.`, { detail });
     return undefined;
   }
 
   if (rooms.length === 0) {
-    void vscode.window.showInformationMessage('No rooms are available to compact.');
+    void showInfoToast('No rooms are available to compact.');
     return undefined;
   }
 
@@ -153,7 +170,7 @@ async function resolveScope(choice: PresetChoice): Promise<ResolvedScope | undef
   }
   const cutoffMs = computeCutoffForDateInput(trimmed);
   if (cutoffMs === undefined) {
-    void vscode.window.showErrorMessage('Invalid date specified.');
+    void showErrorToast('Invalid date specified.');
     return undefined;
   }
   return { cutoffMs, label: `${PRESET_UNTIL_DATE} ${trimmed}` };
@@ -162,6 +179,7 @@ async function resolveScope(choice: PresetChoice): Promise<ResolvedScope | undef
 async function processSpool(
   spoolDir: string,
   logsDir: string,
+  quarantineDir: string,
   cutoffMs: number,
   output: vscode.OutputChannel
 ): Promise<CompactSummary> {
@@ -201,6 +219,7 @@ async function processSpool(
       parsed = JSON.parse(payload);
     } catch (error) {
       output.appendLine(`Invalid JSON in ${filePath}: ${String(error)}`);
+      await moveToQuarantine(filePath, quarantineDir, output);
       skipped++;
       continue;
     }
@@ -275,26 +294,33 @@ export async function runCompactLogs(
     return;
   }
 
-  const spoolDir = wjoin(config.shareRoot, 'rooms', room, 'msgs');
-  const logsDir = wjoin(config.shareRoot, 'rooms', room, 'logs');
+  const roomRoot = wjoin(config.shareRoot, 'rooms', room);
+  const spoolDir = wjoin(roomRoot, 'msgs');
+  const logsDir = wjoin(roomRoot, 'logs');
+  const quarantineDir = wjoin(roomRoot, 'msgs_bad');
   const lockPath = wjoin(logsDir, '.lock');
 
   try {
     const summary = await withFileLock(
       lockPath,
-      async () => processSpool(spoolDir, logsDir, scope.cutoffMs, output),
+      async () => processSpool(spoolDir, logsDir, quarantineDir, scope.cutoffMs, output),
       { ttlMs: LOCK_TTL_MS, detail: `Compacting ${room}` }
     );
     const message = formatSummary(room, scope, summary);
     output.appendLine(message);
-    void vscode.window.showInformationMessage(message);
+    void showInfoToast(message);
   } catch (error) {
     if (error instanceof LockUnavailableError) {
-      void vscode.window.showWarningMessage(error.message);
+      void showWarningToast(error.message);
       return;
     }
     const detail = error instanceof Error ? error.message : String(error);
     output.appendLine(`Compaction failed for "${room}": ${detail}`);
-    void vscode.window.showErrorMessage(`Failed to compact logs for "${room}": ${detail}`);
+    await showErrorToast(`Failed to compact logs for "${room}".`, {
+      detail,
+      onRetry: async () => {
+        await runCompactLogs(config, output);
+      },
+    });
   }
 }

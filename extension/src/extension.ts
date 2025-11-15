@@ -20,6 +20,7 @@ import {
 } from './shared/presence';
 import { postMessage, type SpoolMessage } from './shared/spool';
 import { runCompactLogs } from './compactLogs';
+import { showErrorToast, showInfoToast, showWarningToast } from './toast';
 
 let activeRoom: string | undefined;
 let presenceAvailable = false;
@@ -38,6 +39,7 @@ let globalState: vscode.Memento | undefined;
 
 const ATTACHMENT_PATTERN = /(attachments[\\/][^\s"'`>]+?\.(?:png|jpe?g|svg))/gi;
 const MAX_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.svg']);
+const reportedAttachmentFailures = new Set<string>();
 
 function getLastSeenMessageName(room: string): string | undefined {
   return lastSeenMessageNames.get(room);
@@ -249,6 +251,11 @@ async function resolveImageAttachment(
     outputChannel?.appendLine(
       `Unable to load attachment ${relPath} for message ${message.id}: ${detail}`
     );
+    const failureKey = absolutePath.toLowerCase();
+    if (!reportedAttachmentFailures.has(failureKey)) {
+      reportedAttachmentFailures.add(failureKey);
+      void showWarningToast(`Unable to load attachment ${relPath}.`, { detail });
+    }
     return undefined;
   }
 }
@@ -285,8 +292,20 @@ function startPolling(): void {
   }
 
   pollTimer = setInterval(() => {
-    if (activeRoom) {
-      void loadIncremental(activeRoom);
+    if (!activeRoom) {
+      return;
+    }
+
+    try {
+      const room = activeRoom;
+      const promise = loadIncremental(room);
+      promise.catch((error) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        outputChannel?.appendLine(`Polling tick failed for "${room}": ${detail}`);
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel?.appendLine(`Polling loop threw for "${activeRoom}": ${detail}`);
     }
   }, currentConfig.pollIntervalMs);
 }
@@ -388,16 +407,40 @@ function startPresenceTimers(): void {
   }
 
   if (!heartbeatTimer) {
-    void runHeartbeatOnce();
+    runHeartbeatOnce().catch((error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel?.appendLine(`Heartbeat tick failed: ${detail}`);
+    });
     heartbeatTimer = setInterval(() => {
-      void runHeartbeatOnce();
+      try {
+        const promise = runHeartbeatOnce();
+        promise.catch((error) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          outputChannel?.appendLine(`Heartbeat tick failed: ${detail}`);
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        outputChannel?.appendLine(`Heartbeat timer threw: ${detail}`);
+      }
     }, HEARTBEAT_INTERVAL_MS);
   }
 
   if (!presenceScanTimer) {
-    void runPresenceScanOnce();
+    runPresenceScanOnce().catch((error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel?.appendLine(`Presence scan tick failed: ${detail}`);
+    });
     presenceScanTimer = setInterval(() => {
-      void runPresenceScanOnce();
+      try {
+        const promise = runPresenceScanOnce();
+        promise.catch((error) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          outputChannel?.appendLine(`Presence scan tick failed: ${detail}`);
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        outputChannel?.appendLine(`Presence scan timer threw: ${detail}`);
+      }
     }, PRESENCE_SCAN_INTERVAL_MS);
   }
 }
@@ -449,7 +492,7 @@ async function trySetActiveRoom(
 
   if (room === activeRoom) {
     if (options.showAlreadyActiveMessage) {
-      await vscode.window.showInformationMessage(`Already viewing room "${room}".`);
+      await showInfoToast(`Already viewing room "${room}".`);
     }
     return false;
   }
@@ -478,7 +521,7 @@ async function trySetActiveRoom(
   startPolling();
 
   if (options.showSuccessMessage) {
-    await vscode.window.showInformationMessage(`Switched to room "${activeRoom}".`);
+    await showInfoToast(`Switched to room "${activeRoom}".`);
   }
 
   return true;
@@ -500,6 +543,12 @@ export async function loadInitialTimeline(room: string): Promise<void> {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     outputChannel.appendLine(`Failed to load initial timeline for room "${room}": ${detail}`);
+    await showErrorToast(`Failed to load timeline for "${room}".`, {
+      detail,
+      onRetry: async () => {
+        await loadInitialTimeline(room);
+      },
+    });
   }
 }
 
@@ -622,7 +671,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine('Open Timeline command invoked.');
     await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
     if (!activeRoom) {
-      void vscode.window.showErrorMessage(
+      void showErrorToast(
         'No active room is available. Please switch to a room once it has been provisioned.'
       );
       return;
@@ -631,9 +680,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const presenceNote = presenceAvailable
       ? ''
       : ' Presence updates are disabled until the presence folder is restored.';
-    await vscode.window.showInformationMessage(
-      `raBoard timeline for "${activeRoom}" will appear here.${presenceNote}`
-    );
+    await showInfoToast(`raBoard timeline for "${activeRoom}" will appear here.${presenceNote}`);
   });
 
   const switchRoom = vscode.commands.registerCommand('raBoard.switchRoom', async () => {
@@ -658,7 +705,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const compactLogs = vscode.commands.registerCommand('raBoard.compactLogs', async () => {
     if (!currentConfig || !outputChannel) {
-      void vscode.window.showErrorMessage('Configuration is not available.');
+      void showErrorToast('Configuration is not available.');
       return;
     }
 
@@ -676,14 +723,21 @@ export function deactivate(): void {
 
 function handleRoomError(error: unknown, room: string, outputChannel: vscode.OutputChannel): void {
   if (error instanceof RoomNotReadyError) {
-    const missingPaths = error.missing.map((item) =>
-      item === 'room folder' ? error.roomRoot : `${error.roomRoot}\\${item}`
+    const normalizeRoot = (value: string): string => {
+      let normalized = value.replace(/\//g, '\\');
+      while (normalized.endsWith('\\')) {
+        normalized = normalized.slice(0, -1);
+      }
+      return normalized;
+    };
+    const shareRoot = normalizeRoot(currentConfig?.shareRoot ?? '\\mysv01\\board');
+    const targetPath = `${shareRoot}\\rooms\\${error.room}\\{msgs,attachments,logs}`;
+    const message = `Room not provisioned. Ask admin to create ${targetPath}`;
+    const missingDetail = error.missing.join(', ');
+    outputChannel.appendLine(
+      `Room readiness check failed for "${room}": missing [${missingDetail}] under ${error.roomRoot}`
     );
-    const message = `Room "${error.room}" cannot be opened because the following folders are missing: ${missingPaths.join(
-      ', '
-    )}. Please ask your raBoard administrator to provision them.`;
-    outputChannel.appendLine(`Room readiness check failed for "${room}": ${message}`);
-    void vscode.window.showErrorMessage(message);
+    void showErrorToast(message);
     return;
   }
 
