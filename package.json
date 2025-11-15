@@ -30,39 +30,47 @@
         "raBoard.shareRoot": {
           "type": "string",
           "default": "\\\\mysv01\\board",
-          "description": "UNC path to the shared board root."
+          "description": "UNC path to the shared board root.",
+          "markdownDescription": "UNC path to the shared board root (for example `\\\\mysv01\\board`)."
         },
         "raBoard.defaultRoom": {
           "type": "string",
           "default": "general",
-          "description": "Room to join on startup."
+          "description": "Room to join on startup.",
+          "markdownDescription": "Logical room to join on startup (default `general`)."
         },
         "raBoard.userName": {
           "type": "string",
-          "default": "",
-          "description": "Override for the user name reported in presence (empty uses OS account)."
+          "description": "Override for the user name reported in presence.",
+          "markdownDescription": "Override for the user name reported in presence. Leave empty to use the OS account name as described in the requirements."
         },
         "raBoard.pollIntervalMs": {
           "type": "number",
           "default": 5000,
           "minimum": 1000,
-          "description": "Polling interval for message updates in milliseconds."
+          "description": "Polling interval for message updates in milliseconds.",
+          "markdownDescription": "Polling interval for message updates in milliseconds (default 5000ms, minimum 1000ms)."
         },
         "raBoard.presenceTtlSec": {
           "type": "number",
           "default": 60,
           "minimum": 15,
-          "description": "Seconds before a user is considered offline if presence is stale."
+          "description": "Seconds before a user is considered offline if presence is stale.",
+          "markdownDescription": "Seconds before a user is considered offline if presence is stale (default 60s, minimum 15s)."
         },
         "raBoard.maxImageMB": {
           "type": "number",
           "default": 10,
-          "description": "Maximum inline image size in megabytes before falling back to download links."
+          "minimum": 1,
+          "description": "Maximum inline image size in megabytes before falling back to download links.",
+          "markdownDescription": "Maximum inline image size in megabytes before falling back to download links (default 10MB)."
         },
         "raBoard.maxInlinePx": {
           "type": "number",
           "default": 240,
-          "description": "Maximum rendered image height in pixels."
+          "minimum": 1,
+          "description": "Maximum rendered image height in pixels.",
+          "markdownDescription": "Maximum rendered image height in pixels for inline previews (default 240px)."
         }
       }
     }
