@@ -1,32 +1,137 @@
+import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import { getConfig } from './config';
+import { getConfig, type RaBoardConfig, wjoin } from './config';
 import { BoardViewProvider } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
-import { postMessage } from './shared/spool';
+import { listSince, listTail } from './shared/listing';
+import { postMessage, type SpoolMessage } from './shared/spool';
 
 let activeRoom: string | undefined;
 let presenceAvailable = false;
+let pollTimer: NodeJS.Timeout | undefined;
+let lastSeenMessageName: string | undefined;
+let currentConfig: RaBoardConfig | undefined;
+let outputChannel: vscode.OutputChannel | undefined;
+let boardViewProvider: BoardViewProvider | undefined;
+
+async function readMessage(dir: string, name: string): Promise<SpoolMessage | undefined> {
+  try {
+    const payload = await fs.readFile(wjoin(dir, name), 'utf8');
+    try {
+      return JSON.parse(payload) as SpoolMessage;
+    } catch (parseError) {
+      const detail = parseError instanceof Error ? parseError.message : String(parseError);
+      outputChannel?.appendLine(`Skipping invalid JSON in ${wjoin(dir, name)}: ${detail}`);
+      return undefined;
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    outputChannel?.appendLine(`Failed to read ${wjoin(dir, name)}: ${detail}`);
+    return undefined;
+  }
+}
+
+function startPolling(): void {
+  stopPolling();
+  if (!currentConfig) {
+    return;
+  }
+
+  pollTimer = setInterval(() => {
+    if (activeRoom) {
+      void loadIncremental(activeRoom);
+    }
+  }, currentConfig.pollIntervalMs);
+}
+
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = undefined;
+  }
+}
+
+async function deliverMessages(
+  kind: 'reset' | 'append',
+  dir: string,
+  files: string[]
+): Promise<void> {
+  const view = boardViewProvider;
+  if (!outputChannel || !view) {
+    return;
+  }
+
+  const messages: SpoolMessage[] = [];
+  for (const file of files) {
+    const parsed = await readMessage(dir, file);
+    if (parsed) {
+      messages.push(parsed);
+    }
+  }
+
+  if (kind === 'reset') {
+    await view.resetTimeline(messages);
+  } else if (messages.length > 0) {
+    await view.appendTimeline(messages);
+  }
+}
+
+export async function loadInitialTimeline(room: string): Promise<void> {
+  if (!currentConfig || !outputChannel) {
+    return;
+  }
+
+  const msgsDir = wjoin(currentConfig.shareRoot, 'rooms', room, 'msgs');
+
+  try {
+    const recent = await listTail(msgsDir, currentConfig.initialLoadLimit);
+    await deliverMessages('reset', msgsDir, recent);
+    lastSeenMessageName = recent.length > 0 ? recent[recent.length - 1] : undefined;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    outputChannel.appendLine(`Failed to load initial timeline for room "${room}": ${detail}`);
+  }
+}
+
+export async function loadIncremental(room: string): Promise<void> {
+  if (!currentConfig || !outputChannel) {
+    return;
+  }
+
+  const msgsDir = wjoin(currentConfig.shareRoot, 'rooms', room, 'msgs');
+  const since = lastSeenMessageName ?? '';
+
+  try {
+    const newer = await listSince(msgsDir, since);
+    if (newer.length === 0) {
+      return;
+    }
+
+    await deliverMessages(lastSeenMessageName ? 'append' : 'reset', msgsDir, newer);
+    lastSeenMessageName = newer[newer.length - 1];
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    outputChannel.appendLine(`Failed to load incremental timeline for room "${room}": ${detail}`);
+  }
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const outputChannel = vscode.window.createOutputChannel('raBoard');
+  outputChannel = vscode.window.createOutputChannel('raBoard');
   outputChannel.appendLine('raBoard extension activated.');
 
   const config = getConfig();
+  currentConfig = config;
 
-  const boardViewProvider = new BoardViewProvider(
-    context.extensionUri,
-    outputChannel,
-    async (text) => {
-      const room = activeRoom;
-      if (!room) {
-        throw new Error('No active room is selected.');
-      }
-
-      const author = config.userName || os.userInfo().username;
-      return postMessage(room, author, text);
+  boardViewProvider = new BoardViewProvider(context.extensionUri, outputChannel, async (text) => {
+    const room = activeRoom;
+    if (!room) {
+      throw new Error('No active room is selected.');
     }
-  );
+
+    const author = config.userName || os.userInfo().username;
+    return postMessage(room, author, text);
+  });
   const viewRegistration = vscode.window.registerWebviewViewProvider(
     BoardViewProvider.viewId,
     boardViewProvider,
@@ -44,6 +149,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await ensureRoomReady(config.defaultRoom, config.shareRoot);
     activeRoom = config.defaultRoom;
     outputChannel.appendLine(`Active room set to "${activeRoom}".`);
+    await loadInitialTimeline(activeRoom);
+    startPolling();
   } catch (error) {
     handleRoomError(error, config.defaultRoom, outputChannel);
   }
@@ -87,8 +194,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     try {
       await ensureRoomReady(trimmedRoom, config.shareRoot);
+      stopPolling();
       activeRoom = trimmedRoom;
+      lastSeenMessageName = undefined;
       outputChannel.appendLine(`Switched to room "${activeRoom}".`);
+      await loadInitialTimeline(activeRoom);
+      startPolling();
       await vscode.window.showInformationMessage(`Switched to room "${activeRoom}".`);
     } catch (error) {
       handleRoomError(error, trimmedRoom, outputChannel);
@@ -99,7 +210,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // Reserved for cleanup logic when the extension is deactivated.
+  stopPolling();
 }
 
 function handleRoomError(error: unknown, room: string, outputChannel: vscode.OutputChannel): void {

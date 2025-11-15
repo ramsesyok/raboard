@@ -3,15 +3,32 @@
 
   const timeline = document.querySelector('#timeline');
 
+  function removePlaceholder() {
+    if (!(timeline instanceof HTMLElement)) {
+      return;
+    }
+    const placeholder = timeline.querySelector('.timeline-placeholder');
+    if (placeholder) {
+      placeholder.remove();
+    }
+  }
+
+  function showPlaceholder() {
+    if (!(timeline instanceof HTMLElement)) {
+      return;
+    }
+    const placeholder = document.createElement('p');
+    placeholder.className = 'timeline-placeholder';
+    placeholder.textContent = 'Timeline will appear here.';
+    timeline.append(placeholder);
+  }
+
   function appendMessage(message) {
     if (!(timeline instanceof HTMLElement)) {
       return;
     }
 
-    const placeholder = timeline.querySelector('.timeline-placeholder');
-    if (placeholder) {
-      placeholder.remove();
-    }
+    removePlaceholder();
 
     const item = document.createElement('article');
     item.className = 'timeline-item';
@@ -40,6 +57,22 @@
     item.append(header, body);
     timeline.append(item);
     item.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  function resetTimeline(messages) {
+    if (!(timeline instanceof HTMLElement)) {
+      return;
+    }
+
+    timeline.innerHTML = '';
+    if (!Array.isArray(messages) || messages.length === 0) {
+      showPlaceholder();
+      return;
+    }
+
+    messages.forEach((message) => {
+      appendMessage(message);
+    });
   }
 
   const roomForm = document.querySelector('#room-form');
@@ -77,7 +110,23 @@
 
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (data && data.type === 'send' && data.message) {
+    if (!data) {
+      return;
+    }
+
+    if (data.type === 'reset') {
+      resetTimeline(data.messages);
+      return;
+    }
+
+    if (data.type === 'messages' && Array.isArray(data.append)) {
+      data.append.forEach((message) => {
+        appendMessage(message);
+      });
+      return;
+    }
+
+    if (data.type === 'send' && data.message) {
       appendMessage(data.message);
     }
   });
