@@ -703,6 +703,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
+  const openAttachments = vscode.commands.registerCommand('raBoard.openAttachments', async () => {
+    if (!currentConfig || !outputChannel) {
+      void showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    const room = activeRoom;
+    if (!room) {
+      void showErrorToast('No active room is available.');
+      return;
+    }
+
+    const attachmentsPath = wjoin(currentConfig.shareRoot, 'rooms', room, 'attachments');
+
+    try {
+      const stat = await fs.stat(attachmentsPath);
+      if (!stat.isDirectory()) {
+        throw new Error('Attachments path is not a directory.');
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(
+        `Failed to open attachments for "${room}" at ${attachmentsPath}: ${detail}`
+      );
+      await showErrorToast(`Attachments folder is not available for "${room}".`, { detail });
+      return;
+    }
+
+    const target = vscode.Uri.file(attachmentsPath);
+    try {
+      const opened = await vscode.env.openExternal(target);
+      if (!opened) {
+        await showWarningToast('VS Code was unable to open the attachments folder.');
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(
+        `Opening attachments folder failed for "${room}" at ${attachmentsPath}: ${detail}`
+      );
+      await showErrorToast('Failed to launch the attachments folder.', { detail });
+    }
+  });
+
   const compactLogs = vscode.commands.registerCommand('raBoard.compactLogs', async () => {
     if (!currentConfig || !outputChannel) {
       void showErrorToast('Configuration is not available.');
@@ -712,7 +755,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await runCompactLogs(currentConfig, outputChannel);
   });
 
-  context.subscriptions.push(openTimeline, switchRoom, compactLogs, outputChannel);
+  const toggleDnd = vscode.commands.registerCommand('raBoard.toggleDnd', async () => {
+    if (!currentConfig || !outputChannel) {
+      void showErrorToast('Configuration is not available.');
+      return;
+    }
+
+    const configuration = vscode.workspace.getConfiguration('raBoard');
+    const nextValue = !currentConfig.notifications.dnd;
+
+    try {
+      await configuration.update('notifications.dnd', nextValue, vscode.ConfigurationTarget.Global);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`Failed to update notifications.dnd: ${detail}`);
+      await showErrorToast('Unable to toggle raBoard notifications DND.', { detail });
+      return;
+    }
+
+    currentConfig = {
+      ...currentConfig,
+      notifications: {
+        ...currentConfig.notifications,
+        dnd: nextValue,
+      },
+    };
+
+    notificationMonitor?.refreshIndicators(currentConfig);
+
+    const message = nextValue
+      ? 'raBoard notifications muted (do not disturb enabled).'
+      : 'raBoard notifications unmuted.';
+    outputChannel.appendLine(`Notifications DND ${nextValue ? 'enabled' : 'disabled'}.`);
+    await showInfoToast(message);
+  });
+
+  context.subscriptions.push(
+    openTimeline,
+    switchRoom,
+    openAttachments,
+    compactLogs,
+    toggleDnd,
+    outputChannel
+  );
 }
 
 export function deactivate(): void {

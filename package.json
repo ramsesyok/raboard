@@ -15,7 +15,10 @@
     "onStartupFinished",
     "onCommand:raBoard.openTimeline",
     "onCommand:raBoard.switchRoom",
-    "onCommand:raBoard.compactLogs"
+    "onCommand:raBoard.compactLogs",
+    "onCommand:raBoard.openAttachments",
+    "onCommand:raBoard.toggleDnd",
+    "onCommand:raBoard.openUnreadRoom"
   ],
   "main": "extension/dist/extension.js",
   "contributes": {
@@ -31,6 +34,18 @@
       {
         "command": "raBoard.compactLogs",
         "title": "raBoard: Compact Logs…"
+      },
+      {
+        "command": "raBoard.openAttachments",
+        "title": "raBoard: Open Attachments Folder"
+      },
+      {
+        "command": "raBoard.toggleDnd",
+        "title": "raBoard: Toggle Notifications DND"
+      },
+      {
+        "command": "raBoard.openUnreadRoom",
+        "title": "raBoard: Open Unread Room…"
       }
     ],
     "configuration": {
@@ -81,6 +96,54 @@
           "minimum": 1,
           "description": "Maximum rendered image height in pixels.",
           "markdownDescription": "Maximum rendered image height in pixels for inline previews (default 240px)."
+        },
+        "raBoard.initialLoadLimit": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Maximum number of recent messages to load when a room opens.",
+          "markdownDescription": "Maximum number of recent messages to load when a room opens (default 200)."
+        },
+        "raBoard.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable unread notifications for tracked rooms.",
+          "markdownDescription": "Enable unread notifications for tracked rooms in the status bar and activity badge."
+        },
+        "raBoard.notifications.mode": {
+          "type": "string",
+          "default": "both",
+          "enum": ["both", "toast", "badge", "status"],
+          "description": "Notification channels to use for unread activity.",
+          "markdownDescription": "Select which notification channels to use for unread activity (`both`, `toast`, `badge`, or `status`)."
+        },
+        "raBoard.notifications.rooms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Specific rooms to watch for unread notifications.",
+          "markdownDescription": "Specific rooms to watch for unread notifications. Leave empty to watch every room you open."
+        },
+        "raBoard.notifications.throttleMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 0,
+          "description": "Minimum number of milliseconds between toast notifications.",
+          "markdownDescription": "Minimum number of milliseconds between toast notifications (default 10000ms)."
+        },
+        "raBoard.notifications.includeActiveRoom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include the currently active room when calculating unread notifications.",
+          "markdownDescription": "Include the currently active room when calculating unread notifications."
+        },
+        "raBoard.notifications.dnd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Silence toast notifications (status and badges continue to update).",
+          "markdownDescription": "Silence toast notifications while keeping status and badges up to date."
         }
       }
     }
