@@ -2,7 +2,7 @@ import { constants as fsConstants, promises as fs } from 'fs';
 import * as vscode from 'vscode';
 import { getConfig, wjoin } from './config';
 
-const REQUIRED_ROOM_SUBDIRS = ['msgs', 'attachments', 'logs'] as const;
+export const REQUIRED_ROOM_SUBDIRS = ['msgs', 'attachments', 'logs'] as const;
 
 export class RoomNotReadyError extends Error {
   public readonly room: string;

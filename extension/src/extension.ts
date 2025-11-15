@@ -9,6 +9,7 @@ import {
   type TimelineAttachment,
 } from './boardView';
 import { checkPresenceRoot, ensureRoomReady, RoomNotReadyError } from './readiness';
+import { NotificationMonitor } from './notifications';
 import { listSince, listTail } from './shared/listing';
 import {
   HEARTBEAT_INTERVAL_MS,
@@ -28,6 +29,7 @@ let currentConfig: RaBoardConfig | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let boardViewProvider: BoardViewProvider | undefined;
 let lastPresenceUsers: string[] = [];
+let notificationMonitor: NotificationMonitor | undefined;
 
 const LAST_SEEN_STORAGE_KEY = 'raBoard.lastSeenMessageNames';
 const lastSeenMessageNames = new Map<string, string>();
@@ -493,6 +495,7 @@ export async function loadInitialTimeline(room: string): Promise<void> {
     await deliverMessages('reset', msgsDir, recent);
     const lastSeen = recent.length > 0 ? recent[recent.length - 1] : undefined;
     await updateLastSeenMessageName(room, lastSeen);
+    notificationMonitor?.markRoomRead(room);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     outputChannel.appendLine(`Failed to load initial timeline for room "${room}": ${detail}`);
@@ -516,6 +519,7 @@ export async function loadIncremental(room: string): Promise<void> {
 
     await deliverMessages(lastSeen ? 'append' : 'reset', msgsDir, newer);
     await updateLastSeenMessageName(room, newer[newer.length - 1]);
+    notificationMonitor?.markRoomRead(room);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     outputChannel.appendLine(`Failed to load incremental timeline for room "${room}": ${detail}`);
@@ -573,6 +577,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(viewRegistration);
 
+  const focusRoomFromNotification = async (room: string): Promise<void> => {
+    const trimmed = room.trim();
+    if (!trimmed) {
+      return;
+    }
+    await trySetActiveRoom(trimmed);
+  };
+
+  notificationMonitor = new NotificationMonitor({
+    getConfig: () => currentConfig,
+    getActiveRoom: () => activeRoom,
+    getLastSeenMessageName,
+    onFocusRoom: focusRoomFromNotification,
+    onSummary: async (summary) => {
+      if (boardViewProvider) {
+        await boardViewProvider.updateUnreadSummary(summary);
+      }
+    },
+    output: outputChannel,
+  });
+  context.subscriptions.push(notificationMonitor);
+
+  const openUnreadRooms = vscode.commands.registerCommand('raBoard.openUnreadRoom', async () => {
+    await notificationMonitor?.showUnreadQuickPick();
+  });
+  context.subscriptions.push(openUnreadRooms);
+
   await updatePresenceAvailability(await checkPresenceRoot(config.shareRoot, outputChannel));
 
   try {
@@ -583,6 +614,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch (error) {
     handleRoomError(error, config.defaultRoom, outputChannel);
   }
+
+  notificationMonitor.start();
 
   const openTimeline = vscode.commands.registerCommand('raBoard.openTimeline', async () => {
     outputChannel.appendLine('Open Timeline command invoked.');
@@ -628,6 +661,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export function deactivate(): void {
   stopPolling();
   stopPresenceTimers();
+  notificationMonitor?.dispose();
 }
 
 function handleRoomError(error: unknown, room: string, outputChannel: vscode.OutputChannel): void {
