@@ -1,17 +1,19 @@
 {
-  "name": "raboard",
+  "name": "raBoard",
   "displayName": "raBoard",
   "description": "Lightweight bulletin board/chat extension backed by a shared UNC folder.",
-  "version": "0.1.0",
-  "publisher": "your-name",
+  "version": "0.3.0",
+  "publisher": "ramsesyok",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Productivity",
     "Other"
   ],
   "activationEvents": [
+    "onView:raBoard.view",
     "onStartupFinished",
     "onCommand:raBoard.openTimeline",
     "onCommand:raBoard.switchRoom",
@@ -181,7 +183,8 @@
     "lint:prettier": "prettier --check \"extension/src/**/*.ts\" \"media/**/*.{css,html,js}\"",
     "compile": "tsc -p extension/tsconfig.json",
     "watch": "tsc -p extension/tsconfig.json --watch",
-    "package": "npm run compile && vsce package",
+    "package": "npm run compile && npm run vscode:package",
+    "vscode:package": "npx @vscode/vsce package",
     "test": "vitest",
     "test:integration": "echo \"Integration tests are not yet implemented\"",
     "prepare": "npm run compile"
